@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Jus Dictator</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#17181a">
@@ -25,9 +25,9 @@ button,select,input{font:inherit;color:inherit}
 .btn{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:7px 10px;cursor:pointer}
 .btn:hover{border-color:var(--acc)}
 .btn.pri{background:var(--acc);color:var(--accink);border-color:var(--acc);font-weight:600}
-#main{flex:1;min-height:0;display:flex;flex-direction:column}
-#stage{flex:1;min-height:0;min-width:0;overflow:hidden;padding:8px;display:flex;justify-content:center;align-items:center}
-#wrap{width:100%;height:100%;display:flex;justify-content:center;align-items:center}
+#main{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
+#stage{flex:1;min-height:0;min-width:0;overflow:auto;padding:4px;display:flex;touch-action:pan-x pan-y}
+#wrap{margin:auto;display:flex}
 canvas{background:#fff;border-radius:6px;box-shadow:0 2px 12px rgba(0,0,0,.18);display:block}
 #empty{color:var(--mute);text-align:center;margin-top:12vh}
 #panel{background:var(--card);border-top:1px solid var(--line);padding:6px 12px 8px;font-size:14px}
@@ -48,7 +48,17 @@ input[type=number]{width:64px}
 #menu label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px}
 #menu select{max-width:190px}
 #menu input[type=checkbox]{width:20px;height:20px}
-@media (orientation:landscape) and (max-height:560px){header{padding:3px 10px}#chunk{font-size:16px;min-height:22px}}
+.btn{padding:4px 9px;border-radius:8px}
+header{padding:4px 10px;gap:8px}header h1{font-size:15px}
+#panel{padding:3px 8px 4px}
+.row{gap:4px;margin:2px 0}.row .btn{padding:5px 0;font-size:16px}
+#chunk{min-height:20px;font-size:16px}
+select,input[type=number]{padding:3px 6px}
+#menu{padding:8px;gap:6px;width:min(300px,calc(100vw - 20px))}#menu label{font-size:13px}
+#zoom{position:absolute;right:8px;top:6px;z-index:6;display:flex;gap:3px;opacity:.92}
+#zoom .btn{padding:1px 9px;font-size:15px;background:var(--card)}
+body{touch-action:pan-x pan-y}
+@media (orientation:landscape) and (max-height:560px){header{padding:2px 8px}header .btn{padding:2px 8px}#chunk{font-size:14px;min-height:18px}.row .btn{padding:3px 0;font-size:15px}}
 </style>
 </head>
 <body>
@@ -80,6 +90,11 @@ input[type=number]{width:64px}
   <div id="box"><canvas id="cv" hidden></canvas><div id="ov"></div></div>
 </div></div>
 
+<div id="zoom">
+  <button class="btn" id="zo" aria-label="Zoom out">−</button>
+  <button class="btn" id="zr" aria-label="Reset zoom">100%</button>
+  <button class="btn" id="zi" aria-label="Zoom in">+</button>
+</div>
 <div id="panel">
   <div id="chunk" class="hide"></div>
   <div class="row">
@@ -96,7 +111,7 @@ input[type=number]{width:64px}
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 const $ = id => document.getElementById(id);
-const S = { doc:null, key:"", page:1, words:[], idx:0, playing:false, timer:null, tok:0, last:"" };
+const S = { zoom:1, fit:1, doc:null, key:"", page:1, words:[], idx:0, playing:false, timer:null, tok:0, last:"" };
 const syn = window.speechSynthesis;
 
 function save(){ try{ if(S.key) localStorage.setItem("dict:"+S.key, JSON.stringify({p:S.page,i:S.idx})); }catch(e){} }
@@ -120,9 +135,10 @@ async function draw(){
   const h=st.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom);
   if(w<20||h<20) return;
   const base=S.pg.getViewport({scale:1}), fit=Math.min(w/base.width,h/base.height), dpr=window.devicePixelRatio||1;
-  const vp=S.pg.getViewport({scale:fit*dpr}), cv=$("cv");
+  S.fit=fit; const mx=4096/Math.max(base.width,base.height);
+  const vp=S.pg.getViewport({scale:Math.min(fit*S.zoom*dpr,mx)}), cv=$("cv");
   if(rtask){ try{rtask.cancel();}catch(e){} }
-  cv.style.width=Math.floor(base.width*fit)+"px"; cv.style.height=Math.floor(base.height*fit)+"px";
+  cv.style.width=Math.floor(base.width*fit*S.zoom)+"px"; cv.style.height=Math.floor(base.height*fit*S.zoom)+"px";
   cv.width=vp.width; cv.height=vp.height;
   rtask=S.pg.render({canvasContext:cv.getContext("2d"), viewport:vp});
   try{ await rtask.promise; }catch(e){}
@@ -138,6 +154,19 @@ function hl(){
     d.style.cssText=`left:${(b.x-1)*f}px;top:${(b.y-b.h*0.85)*f}px;width:${(b.w+2)*f}px;height:${b.h*1.05*f}px`;
     ov.appendChild(d);
   }
+  if(S.zoom>1 && !S.pinching && ov.firstChild){
+    const st=$("stage"), a=ov.firstChild.getBoundingClientRect(), r=st.getBoundingClientRect();
+    if(a.top<r.top+10||a.bottom>r.bottom-10||a.left<r.left+10||a.right>r.right-10)
+      st.scrollBy({top:(a.top+a.bottom)/2-(r.top+r.bottom)/2, left:(a.left+a.right)/2-(r.left+r.right)/2, behavior:"smooth"});
+  }
+}
+
+function setZoom(z){
+  S.zoom=Math.max(1,Math.min(4,z)); $("zr").textContent=Math.round(S.zoom*100)+"%";
+  if(!S.pg) return;
+  const b=S.pg.getViewport({scale:1}), cv=$("cv");
+  cv.style.width=Math.floor(b.width*S.fit*S.zoom)+"px"; cv.style.height=Math.floor(b.height*S.fit*S.zoom)+"px";
+  hl(); clearTimeout(rz); rz=setTimeout(draw,150);
 }
 
 async function showPage(n, idx=0){
@@ -218,6 +247,14 @@ $("box").addEventListener("click", e=>{
   });
   jump(best);
 });
+$("zi").onclick=()=>setZoom(S.zoom+0.5);
+$("zo").onclick=()=>setZoom(S.zoom-0.5);
+$("zr").onclick=()=>setZoom(1);
+let pd=0, pz=1;
+const tdist=t=>Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
+$("stage").addEventListener("touchstart",e=>{ if(e.touches.length===2){ pd=tdist(e.touches); pz=S.zoom; S.pinching=true; } },{passive:true});
+$("stage").addEventListener("touchmove",e=>{ if(e.touches.length===2 && pd) setZoom(pz*tdist(e.touches)/pd); },{passive:true});
+$("stage").addEventListener("touchend",e=>{ if(e.touches.length<2){ pd=0; setTimeout(()=>{S.pinching=false;},300); } },{passive:true});
 $("dots").onclick=e=>{ e.stopPropagation(); $("menu").hidden=!$("menu").hidden; };
 document.addEventListener("click",e=>{ if(!$("menu").hidden && !$("menu").contains(e.target)) $("menu").hidden=true; });
 document.addEventListener("keydown", e=>{
