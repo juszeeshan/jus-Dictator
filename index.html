@@ -59,6 +59,13 @@ select,input[type=number]{padding:3px 6px}
 #zoom .btn{padding:1px 9px;font-size:15px;background:var(--card)}
 body{touch-action:pan-x pan-y}
 @media (orientation:landscape) and (max-height:560px){header{padding:2px 8px}header .btn{padding:2px 8px}#chunk{font-size:14px;min-height:18px}.row .btn{padding:3px 0;font-size:15px}}
+#pg{font-size:11px;line-height:1.15;text-align:right;color:var(--mute)}
+#menu .sl{display:flex;align-items:center;gap:6px;font-size:13px}
+#menu .sl span{min-width:86px}
+#menu .sl input[type=range]{flex:1;min-width:0}
+#menu .sl input[type=number]{width:58px}
+#stats{font-size:12px;color:var(--mute);line-height:1.45}
+#pgR{width:100%;height:14px;margin:0 0 2px;display:block}
 </style>
 </head>
 <body>
@@ -69,17 +76,15 @@ body{touch-action:pan-x pan-y}
   <input id="file" type="file" accept="application/pdf" hidden>
   <button class="btn" id="dots" aria-label="Options" title="Options">⋮</button>
   <div id="menu" hidden>
+    <div id="stats"></div>
     <label>Go to page <input id="goto" type="number" min="1" value="1"></label>
-    <label>Words at a time <input id="n" type="number" min="1" max="12" value="3"></label>
-    <label>Writing time per word <select id="pace">
-      <option value="0.6">0.6 s</option><option value="0.9">0.9 s</option><option value="1.2" selected>1.2 s</option>
-      <option value="1.6">1.6 s</option><option value="2">2 s</option><option value="3">3 s</option>
-    </select></label>
+    <label>Words at a time <input id="n" type="number" min="1" value="3"></label>
+    <div class="sl"><span>Writing speed</span><input type="range" id="wpmR" min="1" max="300" value="25"><input type="number" id="wpm" min="1" value="25"><small>wpm</small></div>
+    <div class="sl"><span>Speech speed</span><input type="range" id="rateR" min="0.1" max="5" step="0.05" value="1"><input type="number" id="rate" min="0.1" max="10" step="0.05" value="1"><small>×</small></div>
     <label>Voice <select id="voice"></select></label>
-    <label>Speech speed <select id="rate">
-      <option value="0.6">0.6×</option><option value="0.8">0.8×</option><option value="1" selected>1×</option>
-      <option value="1.2">1.2×</option>
-    </select></label>
+    <label>Say punctuation aloud <input type="checkbox" id="punc" checked></label>
+    <label>Break at commas &amp; full stops <input type="checkbox" id="brk" checked></label>
+    <label>Say “capital” at sentence start <input type="checkbox" id="cap"></label>
     <label>Show words <input type="checkbox" id="show" checked></label>
   </div>
 </header>
@@ -97,6 +102,7 @@ body{touch-action:pan-x pan-y}
 </div>
 <div id="panel">
   <div id="chunk" class="hide"></div>
+  <input type="range" id="pgR" min="1" max="1" value="1" aria-label="Page scroller">
   <div class="row">
     <button class="btn" id="prevPg" title="Previous page" aria-label="Previous page">⏮</button>
     <button class="btn" id="back" title="Previous words" aria-label="Previous words">⏪</button>
@@ -115,8 +121,8 @@ const S = { zoom:1, fit:1, doc:null, key:"", page:1, words:[], idx:0, playing:fa
 const syn = window.speechSynthesis;
 
 function save(){ try{ if(S.key) localStorage.setItem("dict:"+S.key, JSON.stringify({p:S.page,i:S.idx})); }catch(e){} }
-function saveSettings(){ try{ localStorage.setItem("dict:settings", JSON.stringify({n:$("n").value,pace:$("pace").value,rate:$("rate").value,voice:$("voice").value,show:$("show").checked})); }catch(e){} }
-function loadSettings(){ try{ const s=JSON.parse(localStorage.getItem("dict:settings")||"null"); if(s){ $("n").value=s.n; $("pace").value=s.pace; $("rate").value=s.rate; $("show").checked=s.show; S.voicePref=s.voice; } }catch(e){} }
+function saveSettings(){ try{ localStorage.setItem("dict:settings", JSON.stringify({n:$("n").value,wpm:$("wpm").value,rate:$("rate").value,voice:$("voice").value,show:$("show").checked,punc:$("punc").checked,brk:$("brk").checked,cap:$("cap").checked})); }catch(e){} }
+function loadSettings(){ try{ const s=JSON.parse(localStorage.getItem("dict:settings")||"null"); if(s){ $("n").value=s.n; $("wpm").value=s.wpm||25; $("rate").value=s.rate||1; $("show").checked=s.show; $("punc").checked=s.punc!==false; $("brk").checked=s.brk!==false; $("cap").checked=!!s.cap; $("wpmR").value=$("wpm").value; $("rateR").value=$("rate").value; S.voicePref=s.voice; } }catch(e){} }
 
 function fillVoices(){
   const v = syn.getVoices(); if(!v.length) return;
@@ -135,7 +141,7 @@ async function draw(){
   const h=st.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom);
   if(w<20||h<20) return;
   const base=S.pg.getViewport({scale:1}), fit=Math.min(w/base.width,h/base.height), dpr=window.devicePixelRatio||1;
-  S.fit=fit; const mx=4096/Math.max(base.width,base.height);
+  S.fit=fit; const mx=Math.sqrt(16e6/(base.width*base.height));
   const vp=S.pg.getViewport({scale:Math.min(fit*S.zoom*dpr,mx)}), cv=$("cv");
   if(rtask){ try{rtask.cancel();}catch(e){} }
   cv.style.width=Math.floor(base.width*fit*S.zoom)+"px"; cv.style.height=Math.floor(base.height*fit*S.zoom)+"px";
@@ -162,7 +168,7 @@ function hl(){
 }
 
 function setZoom(z){
-  S.zoom=Math.max(1,Math.min(4,z)); $("zr").textContent=Math.round(S.zoom*100)+"%";
+  S.zoom=Math.max(0.2,Math.min(10,z)); $("zr").textContent=Math.round(S.zoom*100)+"%";
   if(!S.pg) return;
   const b=S.pg.getViewport({scale:1}), cv=$("cv");
   cv.style.width=Math.floor(b.width*S.fit*S.zoom)+"px"; cv.style.height=Math.floor(b.height*S.fit*S.zoom)+"px";
@@ -184,20 +190,56 @@ async function showPage(n, idx=0){
     const h = Math.hypot(t[2],t[3]) || 10, w = it.width || 0, re = /\S+/g; let m;
     while((m = re.exec(str))){ S.words.push(m[0]); S.boxes.push({x:t[4]+m.index/str.length*w, y:t[5], w:m[0].length/str.length*w, h}); }
   }
-  S.hlr = {i:S.idx, k:nWords()}; hl();
-  $("pg").textContent = n+" / "+S.doc.numPages;
+  S.hlr = {i:S.idx, k:chunkLen(S.idx)}; hl();
+  updatePg(); stats(); $("pgR").max=S.doc.numPages; $("pgR").value=n;
   $("goto").value = n; $("goto").max = S.doc.numPages;
   $("chunk").textContent = S.words.length ? "" : "No selectable text on this page";
   $("chunk").classList.toggle("hide", !S.words.length || !$("show").checked);
   save();
 }
 
-function nWords(){ return Math.max(1, Math.min(12, parseInt($("n").value)||3)); }
+function nWords(){ return Math.max(1, parseInt($("n").value)||3); }
+const wpmVal=()=>Math.max(1, parseFloat($("wpm").value)||25);
+function chunkLen(i){
+  const k=nWords(); let c=0;
+  for(let j=i; j<S.words.length && c<k; j++){
+    c++; const w=S.words[j];
+    if($("brk").checked){ if(/[.!?]["”'’)\]]*$/.test(w)) break; if(c>=2 && /[,;:]["”'’)\]]*$/.test(w)) break; }
+  }
+  return c;
+}
+function prevStart(i){ let s0=0,last=0; while(s0<i){ last=s0; s0+=chunkLen(s0)||1; } return last; }
+const PM={",":"comma",".":"full stop",";":"semicolon",":":"colon","?":"question mark","!":"exclamation mark","(":"open bracket",")":"close bracket","[":"open bracket","]":"close bracket","“":"open quote","”":"close quote",'"':"quote","—":"dash","–":"dash"};
+function say(w,i){
+  if(!$("punc").checked) return w;
+  if(PM[w]) return PM[w];
+  let core=w, lead=[], trail=[], m;
+  while((m=core.match(/^[(\["“]/)) && core.length>1){ lead.push(PM[m[0]]); core=core.slice(1); }
+  if(/(\.\.\.|…)$/.test(core) && core.length>3){ core=core.replace(/(\.\.\.|…)$/,""); trail.push("dot dot dot"); }
+  while((m=core.match(/[,.;:!?)\]”"]$/)) && core.length>1){ trail.unshift(PM[m[0]]); core=core.slice(0,-1); }
+  const out=[...lead,core,...trail];
+  if($("cap").checked && /^[A-Z]/.test(core) && (i===0 || /[.!?]["”')\]]*$/.test(S.words[i-1]))) out.unshift("capital");
+  return out.join(" ");
+}
+function spoken(i,cnt){ return S.words.slice(i,i+cnt).map((w,j)=>say(w,i+j)).join(" "); }
+function updatePg(){ if(!S.doc) return; $("pg").innerHTML=`p ${S.page}/${S.doc.numPages}<br>w ${Math.min(S.idx,S.words.length)}/${S.words.length}`; }
+function stats(){
+  const t=S.words.join(" "), L=(t.match(/[A-Za-z]/g)||[]).length, c=(t.match(/,/g)||[]).length, sn=(t.match(/[.!?]+(?=\s|$)/g)||[]).length;
+  $("stats").innerHTML=`<b>This page:</b> ${S.words.length} words · ${sn} sentences · ${c} commas · ${L} letters`+(S.docWords?`<br><b>Whole PDF:</b> ${S.docWords} words`:"");
+}
+async function countAll(doc){
+  let tot=0; S.docWords=0;
+  for(let p=1;p<=doc.numPages;p++){
+    if(S.doc!==doc) return;
+    try{ const pg=await doc.getPage(p), tc=await pg.getTextContent(); tot+=tc.items.map(i=>i.str).join(" ").split(/\s+/).filter(Boolean).length; }catch(e){}
+  }
+  S.docWords=tot; stats();
+}
 
 function speak(text, done){
   const t = S.tok, u = new SpeechSynthesisUtterance(text);
   const v = syn.getVoices().find(x=>x.name===$("voice").value); if(v){ u.voice=v; u.lang=v.lang; }
-  u.rate = parseFloat($("rate").value);
+  u.rate = Math.max(0.1, Math.min(10, parseFloat($("rate").value)||1));
   u.onend = ()=>{ if(t===S.tok) done(); };
   u.onerror = ()=>{ if(t===S.tok) done(); };
   syn.speak(u);
@@ -209,12 +251,12 @@ async function step(){
     if(S.page >= S.doc.numPages){ stop(); $("chunk").textContent="Finished 🎉"; $("chunk").classList.remove("hide"); return; }
     await showPage(S.page+1); return step();
   }
-  const k = nWords(), text = S.words.slice(S.idx, S.idx+k).join(" "), cnt = Math.min(k, S.words.length-S.idx);
-  S.hlr = {i:S.idx, k:cnt}; hl(); S.last = text; $("chunk").textContent = text; $("chunk").classList.toggle("hide", !$("show").checked);
-  const t = S.tok;
-  speak(text, ()=>{
-    S.idx += cnt; save();
-    const wait = cnt * parseFloat($("pace").value) * 1000;
+  const cnt = chunkLen(S.idx), text = S.words.slice(S.idx, S.idx+cnt).join(" "), sp = spoken(S.idx,cnt);
+  S.hlr = {i:S.idx, k:cnt}; hl(); S.last = sp; $("chunk").textContent = text; $("chunk").classList.toggle("hide", !$("show").checked);
+  const t = S.tok, t0 = Date.now();
+  speak(sp, ()=>{
+    S.idx += cnt; save(); updatePg();
+    const wait = Math.max(400, cnt*60000/wpmVal() - (Date.now()-t0));
     S.timer = setTimeout(()=>{ if(t===S.tok) step(); }, wait);
   });
 }
@@ -223,19 +265,23 @@ function play(){ if(!S.doc) return; S.playing=true; $("play").textContent="⏸";
 function stop(){ S.playing=false; S.tok++; syn.cancel(); clearTimeout(S.timer); $("play").textContent="▶"; }
 function jump(newIdx){
   if(!S.doc) return; const was=S.playing; stop();
-  S.idx = Math.max(0, Math.min(S.words.length, newIdx)); save(); S.hlr = {i:S.idx, k:nWords()}; hl();
-  if(was) play(); else $("chunk").textContent = S.words.slice(S.idx,S.idx+nWords()).join(" ");
+  S.idx = Math.max(0, Math.min(S.words.length, newIdx)); save(); updatePg(); S.hlr = {i:S.idx, k:chunkLen(S.idx)}; hl();
+  if(was) play(); else $("chunk").textContent = S.words.slice(S.idx,S.idx+chunkLen(S.idx)).join(" ");
 }
 
 $("play").onclick = ()=> S.playing ? stop() : play();
-$("back").onclick = ()=> jump(S.idx - nWords());
-$("next").onclick = ()=> jump(S.idx + nWords());
+$("back").onclick = ()=> jump(prevStart(S.idx));
+$("next").onclick = ()=> jump(S.idx + (chunkLen(S.idx)||1));
 $("rep").onclick  = ()=> { if(!S.doc) return; const was=S.playing; stop(); S.playing=true; S.tok++; const t=S.tok;
-  speak(S.last || S.words.slice(S.idx,S.idx+nWords()).join(" "), ()=>{ if(t!==S.tok) return; S.playing=false; if(was) play(); }); };
+  speak(S.last || spoken(S.idx,chunkLen(S.idx)), ()=>{ if(t!==S.tok) return; S.playing=false; if(was) play(); }); };
 $("prevPg").onclick = async ()=>{ if(!S.doc) return; const was=S.playing; stop(); await showPage(S.page-1); if(was) play(); };
 $("nextPg").onclick = async ()=>{ if(!S.doc) return; const was=S.playing; stop(); await showPage(S.page+1); if(was) play(); };
 $("goto").onchange = async ()=>{ if(!S.doc) return; const was=S.playing; stop(); await showPage(parseInt($("goto").value)||1); if(was) play(); };
-["n","pace","rate","voice","show"].forEach(id=> $(id).addEventListener("change", ()=>{ saveSettings(); if(id==="n" && S.doc && !S.playing){ S.hlr={i:S.idx,k:nWords()}; hl(); } if(id==="show") $("chunk").classList.toggle("hide", !$("show").checked); }));
+["n","wpm","rate","voice","show","punc","brk","cap"].forEach(id=> $(id).addEventListener("change", ()=>{ saveSettings(); if((id==="n"||id==="brk") && S.doc && !S.playing){ S.hlr={i:S.idx,k:chunkLen(S.idx)}; hl(); } if(id==="show") $("chunk").classList.toggle("hide", !$("show").checked); }));
+function bindR(r,n){ r.oninput=()=>{ n.value=r.value; saveSettings(); }; n.addEventListener("change",()=>{ r.value=n.value; }); }
+bindR($("wpmR"),$("wpm")); bindR($("rateR"),$("rate"));
+$("pgR").oninput=()=>{ if(S.doc) $("pg").innerHTML=`p ${$("pgR").value}/${S.doc.numPages}`; };
+$("pgR").onchange=async()=>{ if(!S.doc) return; const was=S.playing; stop(); await showPage(parseInt($("pgR").value)||1); if(was) play(); };
 
 $("box").addEventListener("click", e=>{
   if(!S.boxes || !S.boxes.length) return;
@@ -247,8 +293,8 @@ $("box").addEventListener("click", e=>{
   });
   jump(best);
 });
-$("zi").onclick=()=>setZoom(S.zoom+0.5);
-$("zo").onclick=()=>setZoom(S.zoom-0.5);
+$("zi").onclick=()=>setZoom(S.zoom*1.25);
+$("zo").onclick=()=>setZoom(S.zoom/1.25);
 $("zr").onclick=()=>setZoom(1);
 let pd=0, pz=1;
 const tdist=t=>Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
@@ -275,8 +321,8 @@ $("file").onchange = async e=>{
   S.key = f.name+"|"+f.size; let p=1,i=0;
   try{ const r=JSON.parse(localStorage.getItem("dict:"+S.key)||"null"); if(r){ p=r.p; i=r.i; } }catch(_){}
   $("empty").hidden = true; $("cv").hidden = false;
-  await showPage(p, i);
-  $("chunk").textContent = S.words.slice(S.idx,S.idx+nWords()).join(" ");
+  await showPage(p, i); countAll(S.doc);
+  $("chunk").textContent = S.words.slice(S.idx,S.idx+chunkLen(S.idx)).join(" ");
   $("chunk").classList.toggle("hide", !$("show").checked);
 };
 window.addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(draw,120); });
