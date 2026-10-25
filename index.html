@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PDF Dictation</title>
+<title>Jus Dictator</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#17181a">
 <meta name="mobile-web-app-capable" content="yes">
@@ -19,7 +19,7 @@
 html,body{height:100%;margin:0;overflow:hidden}
 [hidden]{display:none!important}
 body{background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;height:100dvh;display:flex;flex-direction:column}
-header{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--card)}
+header{position:relative;display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--card)}
 header h1{font-size:16px;margin:0;flex:1}
 button,select,input{font:inherit;color:inherit}
 .btn{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:7px 10px;cursor:pointer}
@@ -33,25 +33,42 @@ canvas{background:#fff;border-radius:6px;box-shadow:0 2px 12px rgba(0,0,0,.18);d
 #panel{background:var(--card);border-top:1px solid var(--line);padding:6px 12px 8px;font-size:14px}
 #chunk{min-height:26px;text-align:center;font-size:19px;font-weight:600}
 #chunk.hide{visibility:hidden}
-.row{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;align-items:center;margin:4px 0}
+.row{display:flex;flex-wrap:nowrap;gap:6px;align-items:center;margin:4px 0}
+.row .btn{flex:1;min-width:0;padding:10px 0;font-size:18px;text-align:center}
+.row .btn.pri{flex:1.5}
 .row label{display:flex;gap:6px;align-items:center;color:var(--mute);font-size:13px}
 select,input[type=number]{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
 input[type=number]{width:64px}
 #voice{max-width:230px}
-#pg{color:var(--mute);min-width:70px;text-align:center}
-@media (orientation:landscape) and (max-height:560px){
- header{padding:3px 10px}header h1{font-size:14px}
- #main{flex-direction:row}
- #panel{width:min(46%,400px);overflow:auto;border-top:0;border-left:1px solid var(--line)}
- #chunk{font-size:17px}
-}
+#pg{color:var(--mute);font-size:13px}
+#menu{position:absolute;right:10px;top:100%;margin-top:6px;z-index:20;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;width:min(330px,calc(100vw - 20px));max-height:70dvh;overflow:auto;box-shadow:0 8px 28px rgba(0,0,0,.35);display:grid;gap:12px}
+#menu label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px}
+#menu select{max-width:190px}
+#menu input[type=checkbox]{width:20px;height:20px}
+@media (orientation:landscape) and (max-height:560px){header{padding:3px 10px}#chunk{font-size:16px;min-height:22px}}
 </style>
 </head>
 <body>
 <header>
-  <h1>PDF Dictation</h1>
+  <h1>Jus Dictator</h1>
+  <span id="pg">– / –</span>
   <label class="btn pri" for="file">Upload PDF</label>
   <input id="file" type="file" accept="application/pdf" hidden>
+  <button class="btn" id="dots" aria-label="Options" title="Options">⋮</button>
+  <div id="menu" hidden>
+    <label>Go to page <input id="goto" type="number" min="1" value="1"></label>
+    <label>Words at a time <input id="n" type="number" min="1" max="12" value="3"></label>
+    <label>Writing time per word <select id="pace">
+      <option value="0.6">0.6 s</option><option value="0.9">0.9 s</option><option value="1.2" selected>1.2 s</option>
+      <option value="1.6">1.6 s</option><option value="2">2 s</option><option value="3">3 s</option>
+    </select></label>
+    <label>Voice <select id="voice"></select></label>
+    <label>Speech speed <select id="rate">
+      <option value="0.6">0.6×</option><option value="0.8">0.8×</option><option value="1" selected>1×</option>
+      <option value="1.2">1.2×</option>
+    </select></label>
+    <label>Show words <input type="checkbox" id="show" checked></label>
+  </div>
 </header>
 
 <div id="main">
@@ -63,29 +80,12 @@ input[type=number]{width:64px}
 <div id="panel">
   <div id="chunk" class="hide"></div>
   <div class="row">
-    <button class="btn" id="prevPg" title="Previous page">⏮ Page</button>
-    <button class="btn" id="back" title="Previous words (←)">◀ Back</button>
-    <button class="btn" id="rep" title="Repeat these words (R)">↻ Repeat</button>
-    <button class="btn pri" id="play" title="Play / pause (Space)">▶ Play</button>
-    <button class="btn" id="next" title="Next words (→)">Next ▶</button>
-    <button class="btn" id="nextPg" title="Next page">Page ⏭</button>
-  </div>
-  <div class="row">
-    <span id="pg">– / –</span>
-    <label>Go to page <input id="goto" type="number" min="1" value="1"></label>
-    <label>Words at a time <input id="n" type="number" min="1" max="12" value="3"></label>
-    <label>Writing time per word <select id="pace">
-      <option value="0.6">0.6 s</option><option value="0.9">0.9 s</option><option value="1.2" selected>1.2 s</option>
-      <option value="1.6">1.6 s</option><option value="2">2 s</option><option value="3">3 s</option>
-    </select></label>
-  </div>
-  <div class="row">
-    <label>Voice <select id="voice"></select></label>
-    <label>Speech speed <select id="rate">
-      <option value="0.6">0.6×</option><option value="0.8">0.8×</option><option value="1" selected>1×</option>
-      <option value="1.2">1.2×</option>
-    </select></label>
-    <label><input type="checkbox" id="show" checked> Show words</label>
+    <button class="btn" id="prevPg" title="Previous page" aria-label="Previous page">⏮</button>
+    <button class="btn" id="back" title="Previous words" aria-label="Previous words">⏪</button>
+    <button class="btn" id="rep" title="Repeat" aria-label="Repeat">↻</button>
+    <button class="btn pri" id="play" title="Play / pause" aria-label="Play or pause">▶</button>
+    <button class="btn" id="next" title="Next words" aria-label="Next words">⏩</button>
+    <button class="btn" id="nextPg" title="Next page" aria-label="Next page">⏭</button>
   </div>
 </div>
 </div>
@@ -167,8 +167,8 @@ async function step(){
   });
 }
 
-function play(){ if(!S.doc) return; S.playing=true; $("play").textContent="⏸ Pause"; S.tok++; step(); }
-function stop(){ S.playing=false; S.tok++; syn.cancel(); clearTimeout(S.timer); $("play").textContent="▶ Play"; }
+function play(){ if(!S.doc) return; S.playing=true; $("play").textContent="⏸"; S.tok++; step(); }
+function stop(){ S.playing=false; S.tok++; syn.cancel(); clearTimeout(S.timer); $("play").textContent="▶"; }
 function jump(newIdx){
   if(!S.doc) return; const was=S.playing; stop();
   S.idx = Math.max(0, Math.min(S.words.length, newIdx)); save();
@@ -185,7 +185,10 @@ $("nextPg").onclick = async ()=>{ if(!S.doc) return; const was=S.playing; stop()
 $("goto").onchange = async ()=>{ if(!S.doc) return; const was=S.playing; stop(); await showPage(parseInt($("goto").value)||1); if(was) play(); };
 ["n","pace","rate","voice","show"].forEach(id=> $(id).addEventListener("change", ()=>{ saveSettings(); if(id==="show") $("chunk").classList.toggle("hide", !$("show").checked); }));
 
+$("dots").onclick=e=>{ e.stopPropagation(); $("menu").hidden=!$("menu").hidden; };
+document.addEventListener("click",e=>{ if(!$("menu").hidden && !$("menu").contains(e.target)) $("menu").hidden=true; });
 document.addEventListener("keydown", e=>{
+  if(e.key==="Escape") $("menu").hidden=true;
   if(["INPUT","SELECT"].includes(document.activeElement.tagName) && e.key!=="Escape") return;
   if(e.code==="Space"){ e.preventDefault(); $("play").click(); }
   else if(e.key==="ArrowLeft") $("back").click();
