@@ -41,6 +41,9 @@ select,input[type=number]{background:var(--bg);border:1px solid var(--line);bord
 input[type=number]{width:64px}
 #voice{max-width:230px}
 #pg{color:var(--mute);font-size:13px}
+#box{position:relative;line-height:0;cursor:pointer}
+#ov{position:absolute;inset:0;pointer-events:none}
+.hl{position:absolute;background:rgba(255,196,0,.5);border-radius:3px;mix-blend-mode:multiply;box-shadow:0 0 0 1px rgba(230,150,0,.6)}
 #menu{position:absolute;right:10px;top:100%;margin-top:6px;z-index:20;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;width:min(330px,calc(100vw - 20px));max-height:70dvh;overflow:auto;box-shadow:0 8px 28px rgba(0,0,0,.35);display:grid;gap:12px}
 #menu label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px}
 #menu select{max-width:190px}
@@ -73,8 +76,8 @@ input[type=number]{width:64px}
 
 <div id="main">
 <div id="stage"><div id="wrap">
-  <div id="empty">Upload a PDF to start.<br>The voice will read a few words at a time, then wait for you to write.</div>
-  <canvas id="cv" hidden></canvas>
+  <div id="empty">Upload a PDF to start.<br>The voice will read a few words at a time, then wait for you to write.<br>Tap any word on the page to start from there.</div>
+  <div id="box"><canvas id="cv" hidden></canvas><div id="ov"></div></div>
 </div></div>
 
 <div id="panel">
@@ -123,16 +126,36 @@ async function draw(){
   cv.width=vp.width; cv.height=vp.height;
   rtask=S.pg.render({canvasContext:cv.getContext("2d"), viewport:vp});
   try{ await rtask.promise; }catch(e){}
+  hl();
+}
+
+function hl(){
+  const ov=$("ov"); ov.innerHTML="";
+  if(!S.boxes||!S.hlr||!S.pg) return;
+  const f=$("cv").clientWidth/S.pg.getViewport({scale:1}).width;
+  for(let j=S.hlr.i; j<S.hlr.i+S.hlr.k && j<S.boxes.length; j++){
+    const b=S.boxes[j], d=document.createElement("div"); d.className="hl";
+    d.style.cssText=`left:${(b.x-1)*f}px;top:${(b.y-b.h*0.85)*f}px;width:${(b.w+2)*f}px;height:${b.h*1.05*f}px`;
+    ov.appendChild(d);
+  }
 }
 
 async function showPage(n, idx=0){
   S.tok++; syn.cancel(); clearTimeout(S.timer);
   n = Math.max(1, Math.min(S.doc.numPages, n));
   S.page = n; S.idx = idx;
-  S.pg = await S.doc.getPage(n);
+  S.pg = await S.doc.getPage(n); S.boxes = null; $("ov").innerHTML="";
   await draw();
   const tc = await S.pg.getTextContent();
-  S.words = tc.items.map(i=>i.str).join(" ").split(/\s+/).filter(Boolean);
+  const base = S.pg.getViewport({scale:1});
+  S.words = []; S.boxes = [];
+  for(const it of tc.items){
+    const str = it.str; if(!str.trim()) continue;
+    const t = pdfjsLib.Util.transform(base.transform, it.transform);
+    const h = Math.hypot(t[2],t[3]) || 10, w = it.width || 0, re = /\S+/g; let m;
+    while((m = re.exec(str))){ S.words.push(m[0]); S.boxes.push({x:t[4]+m.index/str.length*w, y:t[5], w:m[0].length/str.length*w, h}); }
+  }
+  S.hlr = {i:S.idx, k:nWords()}; hl();
   $("pg").textContent = n+" / "+S.doc.numPages;
   $("goto").value = n; $("goto").max = S.doc.numPages;
   $("chunk").textContent = S.words.length ? "" : "No selectable text on this page";
@@ -158,7 +181,7 @@ async function step(){
     await showPage(S.page+1); return step();
   }
   const k = nWords(), text = S.words.slice(S.idx, S.idx+k).join(" "), cnt = Math.min(k, S.words.length-S.idx);
-  S.last = text; $("chunk").textContent = text; $("chunk").classList.toggle("hide", !$("show").checked);
+  S.hlr = {i:S.idx, k:cnt}; hl(); S.last = text; $("chunk").textContent = text; $("chunk").classList.toggle("hide", !$("show").checked);
   const t = S.tok;
   speak(text, ()=>{
     S.idx += cnt; save();
@@ -171,7 +194,7 @@ function play(){ if(!S.doc) return; S.playing=true; $("play").textContent="⏸";
 function stop(){ S.playing=false; S.tok++; syn.cancel(); clearTimeout(S.timer); $("play").textContent="▶"; }
 function jump(newIdx){
   if(!S.doc) return; const was=S.playing; stop();
-  S.idx = Math.max(0, Math.min(S.words.length, newIdx)); save();
+  S.idx = Math.max(0, Math.min(S.words.length, newIdx)); save(); S.hlr = {i:S.idx, k:nWords()}; hl();
   if(was) play(); else $("chunk").textContent = S.words.slice(S.idx,S.idx+nWords()).join(" ");
 }
 
@@ -183,8 +206,18 @@ $("rep").onclick  = ()=> { if(!S.doc) return; const was=S.playing; stop(); S.pla
 $("prevPg").onclick = async ()=>{ if(!S.doc) return; const was=S.playing; stop(); await showPage(S.page-1); if(was) play(); };
 $("nextPg").onclick = async ()=>{ if(!S.doc) return; const was=S.playing; stop(); await showPage(S.page+1); if(was) play(); };
 $("goto").onchange = async ()=>{ if(!S.doc) return; const was=S.playing; stop(); await showPage(parseInt($("goto").value)||1); if(was) play(); };
-["n","pace","rate","voice","show"].forEach(id=> $(id).addEventListener("change", ()=>{ saveSettings(); if(id==="show") $("chunk").classList.toggle("hide", !$("show").checked); }));
+["n","pace","rate","voice","show"].forEach(id=> $(id).addEventListener("change", ()=>{ saveSettings(); if(id==="n" && S.doc && !S.playing){ S.hlr={i:S.idx,k:nWords()}; hl(); } if(id==="show") $("chunk").classList.toggle("hide", !$("show").checked); }));
 
+$("box").addEventListener("click", e=>{
+  if(!S.boxes || !S.boxes.length) return;
+  const r=$("cv").getBoundingClientRect(), f=r.width/S.pg.getViewport({scale:1}).width;
+  const px=(e.clientX-r.left)/f, py=(e.clientY-r.top)/f; let best=0, bd=1e12;
+  S.boxes.forEach((b,i)=>{
+    const top=b.y-b.h*.85, dx=px<b.x?b.x-px:(px>b.x+b.w?px-b.x-b.w:0), dy=py<top?top-py:(py>top+b.h?py-top-b.h:0);
+    const d=dx*dx+dy*dy*4; if(d<bd){ bd=d; best=i; }
+  });
+  jump(best);
+});
 $("dots").onclick=e=>{ e.stopPropagation(); $("menu").hidden=!$("menu").hidden; };
 document.addEventListener("click",e=>{ if(!$("menu").hidden && !$("menu").contains(e.target)) $("menu").hidden=true; });
 document.addEventListener("keydown", e=>{
