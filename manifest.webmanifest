@@ -1,6 +1,6 @@
 {
- "name": "PDF Dictation",
- "short_name": "Dictation",
+ "name": "Jus Dictator",
+ "short_name": "Jus Dictator",
  "start_url": "./",
  "scope": "./",
  "display": "standalone",
