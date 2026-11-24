@@ -329,5 +329,6 @@ window.addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(draw,120
 window.addEventListener("orientationchange", ()=>{ clearTimeout(rz); rz=setTimeout(draw,300); });
 if("serviceWorker" in navigator && location.protocol.startsWith("http")) window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 </script>
+<script src="jus-features.js"></script>
 </body>
 </html>

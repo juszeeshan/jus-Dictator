@@ -1,6 +1,6 @@
 const C="dictation-v1";
 const V="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
-const A=["./","index.html","manifest.webmanifest","icon-192.png","icon-512.png",V+"pdf.min.js",V+"pdf.worker.min.js"];
+const A=["./","index.html","manifest.webmanifest","jus-features.js","icon-192.png","icon-512.png",V+"pdf.min.js",V+"pdf.worker.min.js"];
 self.addEventListener("install",e=>{e.waitUntil(caches.open(C).then(c=>Promise.all(A.map(u=>c.add(new Request(u,{mode:"cors"})).catch(()=>{})))).then(()=>self.skipWaiting()))});
 self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==C).map(x=>caches.delete(x)))).then(()=>clients.claim()))});
 self.addEventListener("fetch",e=>{
