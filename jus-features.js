@@ -298,3 +298,83 @@ setMode(S.rmode); setTimeout(fillHi,400);
 if(syn.addEventListener) syn.addEventListener("voiceschanged",()=>setTimeout(fillHi,150));
 (async()=>{ const l=await allMeta(); if(!l.length){ libOpen(); return; }
   const d=await getFile(l[0].id); if(d!=null) openDoc(l[0],d).catch(()=>{}); })();
+
+// ===== lock-screen / background playback, loop a section =====
+(function(){
+  const st=document.createElement("style");
+  st.textContent='#dark{position:fixed;inset:0;background:#000;z-index:999;display:flex;align-items:flex-end;justify-content:center;color:#333;padding:34px;font-size:13px;touch-action:manipulation}';
+  document.head.appendChild(st);
+  $("stats").insertAdjacentHTML("beforebegin",'<div class="tools"><button class="btn" id="lpA">A ▶ Start</button><button class="btn" id="lpB">B ■ End</button><button class="btn" id="lpThis">🔁 This</button><button class="btn" id="lpX">✕</button></div><div class="tools"><button class="btn" id="darkBtn">🌙 Screen-off mode</button></div>');
+  $("menu").insertAdjacentHTML("beforeend",'<label>Repeat loop <select id="loopN"><option value="0">∞</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option><option value="10">10×</option><option value="20">20×</option></select></label><label>Keep screen on while playing <input type="checkbox" id="keepOn"></label>');
+  document.body.insertAdjacentHTML("beforeend",'<div id="dark" hidden><span>Playing · double-tap to wake</span></div>');
+})();
+try{ const f=JSON.parse(localStorage.getItem("dict:fx2")||"null"); if(f){ $("loopN").value=f.ln||"0"; $("keepOn").checked=!!f.ko; } }catch(e){}
+$("loopN").addEventListener("change",()=>{ try{ localStorage.setItem("dict:fx2",JSON.stringify({ln:$("loopN").value,ko:$("keepOn").checked})); }catch(e){} updatePg(); });
+$("keepOn").addEventListener("change",()=>{ try{ localStorage.setItem("dict:fx2",JSON.stringify({ln:$("loopN").value,ko:$("keepOn").checked})); }catch(e){} if($("keepOn").checked&&S.playing) wlOn(); else if(!dark) wlOff(); });
+
+// --- loop A-B ---
+const posKey=(p,i)=>p*1e7+i;
+function toast(t){ $("chunk").textContent=t; $("chunk").classList.remove("hide"); }
+$("lpA").onclick=()=>{ $("menu").hidden=true; if(!S.doc||!S.hlr) return; S.loop={a:{p:S.page,i:S.hlr.i},b:null,n:0,in:false}; toast("Loop start set. Now set the end."); updatePg(); };
+$("lpB").onclick=()=>{ $("menu").hidden=true; if(!S.loop||!S.loop.a){ toast("Set the loop start first"); return; }
+  const b={p:S.page,i:S.hlr.i+S.hlr.k};
+  if(posKey(b.p,b.i)<=posKey(S.loop.a.p,S.loop.a.i)){ toast("End must be after the start"); return; }
+  S.loop.b=b; S.loop.n=0; S.loop.in=false; toast("Loop set"); updatePg(); };
+$("lpThis").onclick=()=>{ $("menu").hidden=true; if(!S.doc||!S.hlr) return;
+  S.loop={a:{p:S.page,i:S.hlr.i},b:{p:S.page,i:S.hlr.i+S.hlr.k},n:0,in:false}; toast("Looping this part"); updatePg(); };
+$("lpX").onclick=()=>{ $("menu").hidden=true; S.loop=null; toast("Loop cleared"); updatePg(); };
+const _step=step;
+step=async function(){
+  if(S.playing&&S.loop&&S.loop.b&&S.doc){
+    const a=S.loop.a, b=S.loop.b, k=posKey(S.page,S.idx);
+    if(k>=posKey(a.p,a.i)&&k<posKey(b.p,b.i)) S.loop.in=true;
+    else if(S.loop.in&&k>=posKey(b.p,b.i)){
+      const mx=+$("loopN").value||0;
+      if(mx&&S.loop.n+1>=mx){ S.loop=null; toast("Loop finished"); updatePg(); }
+      else { S.loop.n++; if(a.p===S.page) S.idx=a.i; else await showPage(a.p,a.i); updatePg(); }
+    }
+  }
+  return _step();
+};
+
+// --- lock screen: silent audio keeps the page alive, Media Session gives lock-screen buttons ---
+function silentWav(){
+  const sr=8000, n=sr*6, b=new ArrayBuffer(44+n*2), v=new DataView(b), w=(o,s)=>{ for(let i=0;i<s.length;i++) v.setUint8(o+i,s.charCodeAt(i)); };
+  w(0,"RIFF"); v.setUint32(4,36+n*2,true); w(8,"WAVE"); w(12,"fmt "); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,"data"); v.setUint32(40,n*2,true);
+  for(let i=0;i<n;i++) v.setInt16(44+i*2,i%2?2:-2,true);
+  return URL.createObjectURL(new Blob([b],{type:"audio/wav"}));
+}
+const ka=new Audio(silentWav()); ka.loop=true; ka.volume=0.02; let kt, wl=null, dark=false;
+async function wlOn(){ try{ if("wakeLock" in navigator&&!wl){ wl=await navigator.wakeLock.request("screen"); wl.addEventListener("release",()=>{ wl=null; }); } }catch(e){} }
+function wlOff(){ try{ if(wl) wl.release(); }catch(e){} wl=null; }
+function msMeta(){
+  if(!("mediaSession" in navigator)||!window.MediaMetadata) return;
+  const title=S.cur?S.cur.name:"Jus Dictator", album=S.doc?"Page "+S.page+" / "+S.doc.numPages:"", key=title+"|"+album+"|"+S.rmode;
+  if(key===S.msk) return; S.msk=key;
+  try{ navigator.mediaSession.metadata=new MediaMetadata({title,artist:S.rmode?"Jus Dictator · Reading":"Jus Dictator · Dictation",album,artwork:[{src:"icon-512.png",sizes:"512x512",type:"image/png"}]}); }catch(e){}
+}
+function keepOn(){ clearTimeout(kt); ka.play().catch(()=>{}); msMeta(); if("mediaSession" in navigator) navigator.mediaSession.playbackState="playing"; if($("keepOn").checked||dark) wlOn(); }
+function keepOff(){ clearTimeout(kt); kt=setTimeout(()=>{ if(S.playing) return; ka.pause(); if("mediaSession" in navigator) navigator.mediaSession.playbackState="paused"; if(!dark) wlOff(); },1500); }
+const _play=play, _stop=stop;
+play=function(){ _play(); if(S.playing) keepOn(); };
+stop=function(){ _stop(); keepOff(); };
+const _up=updatePg;
+updatePg=function(){ _up(); msMeta();
+  if(S.loop&&$("pg")){ const mx=+$("loopN").value||0; $("pg").innerHTML+="<br>🔁 "+(S.loop.b?(S.loop.n+1)+"/"+(mx||"∞"):"A set"); } };
+if("mediaSession" in navigator){
+  const set=(a,f)=>{ try{ navigator.mediaSession.setActionHandler(a,f); }catch(e){} };
+  set("play",()=>{ if(!S.playing) play(); }); set("pause",()=>{ if(S.playing) stop(); });
+  set("previoustrack",()=>$("back").click()); set("nexttrack",()=>$("next").click());
+  set("seekbackward",()=>$("prevPg").click()); set("seekforward",()=>$("nextPg").click());
+}
+// If the phone silently kills the voice while locked, say the current words again
+const _speak=speak;
+speak=function(text,done){ S.spk=true; S.spkAt=Date.now(); _speak(text,()=>{ S.spk=false; done(); }); };
+setInterval(()=>{ if(S.playing&&S.spk&&!syn.speaking&&!syn.pending&&Date.now()-S.spkAt>2500){ S.spk=false; syn.cancel(); S.tok++; step(); } },2000);
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"&&S.playing){ if($("keepOn").checked||dark) wlOn(); try{ syn.resume(); }catch(e){} } });
+
+// --- screen-off mode: black screen, stays awake, double-tap to wake ---
+let lastTap=0;
+$("darkBtn").onclick=()=>{ $("menu").hidden=true; dark=true; $("dark").hidden=false; wlOn(); };
+$("dark").addEventListener("click",()=>{ const n=Date.now(); if(n-lastTap<450){ dark=false; $("dark").hidden=true; if(!$("keepOn").checked||!S.playing) wlOff(); } lastTap=n; });
